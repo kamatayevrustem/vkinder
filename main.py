@@ -8,10 +8,10 @@ import json
 import vk
 import operator
 
-
 class VK:
+
     def get_token(self):
-        VK_API = 7558354
+        VK_API = 7579783
         BASE_URL = 'https://oauth.vk.com/authorize'
         authorization = {
             'client_id': VK_API,
@@ -27,7 +27,7 @@ class VK:
         api = vk.API(session, v='5.101')
         return api
 
-    def get_user_id(self):
+    def get_user_id(self, api):
         user_id = None
         user = input('Введите ID или коротий адрес страницы: ')
         while user_id == None:
@@ -41,17 +41,16 @@ class VK:
 
     def set_age_for_search(self):
         age_line = []
-        age_from, age_to = map(str, input(
-            'Введите через пробел возраст ОТ которого и ДО которого искать: ').split())
+        age_from, age_to = map(str, input('Введите через пробел возраст от и до: ').split())
         age_line.append(int(age_from))
         age_line.append(int(age_to))
         return age_line
 
-    def get_user_info(self, user_id):
+    def get_user_info(self, user_id, api):
         user_info = api.users.get(user_ids=user_id, fields='interests, sex, city, books, music')
         return user_info
 
-    def set_city_for_search(self, user_info):
+    def set_city_for_search(self, user_info, api):
         try:
             city = user_info[0]['city']['id']
         except KeyError:
@@ -78,30 +77,39 @@ class VK:
         filter_interests = [item for item in interests if item != '']
         return filter_interests
 
-    def get_groups(self, user_id):
+    def get_groups(self, user_id, api):
         groups_response = api.groups.get(user_id=user_id)
         groups = groups_response['items']
         return groups
 
-    def search(self, city, sex, age_line):
-        res = api.users.search(city=city, sex=sex, age_from=age_line[0], age_to=age_line[1])
-        print('.')
+
+    def search(self, city, sex, age_line, music_user, api):
+        print('Начинаю поиск по параметрам')
+        res = api.users.search(city=city, sex=sex, age_from=age_line[0], age_to=age_line[1], fields='music')
+        print('res', res)
         offset = 0
         users_list = []
         while offset < res['count']:
             try:
-                users = api.users.search(city=city, sex=sex, age_from=age_line[0], age_to=age_line[1],
-                                         count=1000, offset=offset)
+                users = api.users.search(city=city, sex=sex, age_from=age_line[0], age_to=age_line[1], fields='music', count=1000, offset=offset)
+
+                for user in users['items']:
+                    try:
+                        if music_user in user['music']:
+                            print(user['id']['music'])
+                            users_list.append(user['id'])
+                    except KeyError:
+                        continue
                 print('.')
+
             except vk.exceptions.VkAPIError:
                 time.sleep(0.5)
                 continue
-            for user in users['items']:
-                users_list.append(user['id'])
             offset += 1000
         return users_list
 
-    def count_groups_match_points(self, users_list):
+
+    def count_groups_match_points(self, users_list, api):
         group_matches = {}
         for id in users_list:
             try:
@@ -116,7 +124,7 @@ class VK:
         group_matches = dict(group_matches)
         return group_matches
 
-    def count_interests_match_points(self, users_list, filter_interests):
+    def count_interests_match_points(self, users_list, filter_interests, api):
         interests_matches = {}
         for id in users_list:
             try:
@@ -156,7 +164,7 @@ class VK:
                 top10_users.append(user[0])
         return top10_users
 
-    def get_photos(self, top10_users):
+    def get_photos(self, top10_users, api):
         to_write = []
         for id in top10_users:
             top_likes_list = []
@@ -190,20 +198,26 @@ class VK:
         return data
 
 
-if __name__ == '__main__':
-    skip_ids, top10_users_mongo = start_bd()
-    skip_ids_list = get_skip_ids_list(skip_ids)
+
+def start_main():
     user = VK()
     api = user.get_token()
-    user_id = user.get_user_id()
+    user_id = user.get_user_id(api)
+    skip_ids, top10_users_mongo = start_bd()
+    skip_ids_list = get_skip_ids_list(skip_ids)
     age_line = user.set_age_for_search()
-    user_info = user.get_user_info(user_id)
-    city = user.set_city_for_search(user_info)
+    user_info = user.get_user_info(user_id, api)
+    print('user_info: ', user_info)
+    city = user.set_city_for_search(user_info, api)
     sex = user.set_sex_for_search(user_info)
-    interests = user.get_interests(user_info)
-    groups = user.get_groups(user_id)
-    users_list = user.search(city, sex, age_line)
-    group_matches = user.count_groups_match_points(users_list)
+    groups = user.get_groups(user_id,api)
+    print('Пользователь состоит в группах: ', groups)
+    music_user =  user_info[0]['music']
+    print('Музыка пользователя:', music_user)
+
+    users_list = user.search(city, sex, age_line, music_user, api)
+    print('Список подходящих: ',users_list)
+    group_matches = user.count_groups_match_points(users_list, api)
     interests_matches = user.count_interests_match_points(users_list, interests)
     total_match_points = user.count_total_match_points(interests_matches, group_matches)
     top10_users = user.get_top10_users(total_match_points, skip_ids_list)
@@ -211,3 +225,7 @@ if __name__ == '__main__':
     photos = user.get_photos(top10_users)
     data = user.write_top10users_json(photos)
     write_top10users_bd(data, top10_users_mongo)
+
+if __name__ == '__main__':
+    start_main()
+
