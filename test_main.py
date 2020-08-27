@@ -7,7 +7,7 @@ import time
 
 class Test_VKinder(unittest.TestCase):
     def setUp(self):
-        with open('fixture/token.txt', 'r', encoding='UTF-8') as f:
+        with open('token.txt', 'r', encoding='UTF-8') as f:
             token = f.read()
         session = vk.Session(access_token=token)
         self.api = vk.API(session)
